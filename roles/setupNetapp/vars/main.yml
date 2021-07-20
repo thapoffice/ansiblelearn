@@ -1,0 +1,8 @@
+aggr_prefix: aggr1
+disk_count: 10
+subnet_name: Demo
+subnet: 192.168.0.0/24
+broadcast_domain: Default
+ipspace: Default
+gateway: 192.168.0.1
+ip_ranges: [ '192.168.0.131-192.168.0.139' ]

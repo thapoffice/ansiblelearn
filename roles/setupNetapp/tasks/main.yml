@@ -1,0 +1,32 @@
+# Performs cluster-level configuration. Specifically, creates an aggregate
+# on each cluster node, and then creates a subnet.
+---
+- name: ===== Executing Cluster Setup NetApp playbook
+  hosts: localhost
+  gather_facts: false
+
+- name: Begin cluster post-creation configuration
+  hosts: localhost
+  collections:
+    - netapp.ontap
+  gather_facts: false
+
+  - name: Gather cluster vserver and node info
+    na_ontap_info:
+      state: info
+      gather_subset: cluster_node_info
+      <<: *ontap
+    register: node_info
+  - name: Create aggregate
+    na_ontap_aggregate:
+      state: present
+      name: "{{ aggr_prefix }}_{{ item | replace('-', '_')}}"
+      disk_count: "{{ disk_count }}"
+      raid_type: raid_tec
+      raid_size: 24
+      hostname: "{{hostname}}"
+      username: "{{username}}"
+      password: "{{password}}"
+      https: true
+      validate_certs: no
+    loop: "{{ node_info.ontap_info.cluster_node_info | list}}"
