@@ -1,0 +1,6 @@
+---
+hostname: cluster1.demo.netapp.com
+username: admin
+password: Netapp1!
+https: true
+validate_certs: true

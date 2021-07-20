@@ -1,0 +1,12 @@
+# NetApp setup using ansible
+
+- name: Configures Aggregates and other settings on Netapp
+  hosts: all
+  connection: local
+  gather_facts: no
+  vars_files:
+    - vars/cluster.yml
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  roles:
+  - role: setupNetapp
