@@ -11,22 +11,21 @@
     - netapp.ontap
   gather_facts: false
 
-  - name: Gather cluster vserver and node info
-    na_ontap_info:
-      state: info
-      gather_subset: cluster_node_info
-      <<: *ontap
-    register: node_info
-  - name: Create aggregate
-    na_ontap_aggregate:
-      state: present
-      name: "{{ aggr_prefix }}_{{ item | replace('-', '_')}}"
-      disk_count: "{{ disk_count }}"
-      raid_type: raid_tec
-      raid_size: 24
-      hostname: "{{hostname}}"
-      username: "{{username}}"
-      password: "{{password}}"
-      https: true
-      validate_certs: no
-    loop: "{{ node_info.ontap_info.cluster_node_info | list}}"
+- name: Gather cluster vserver and node info
+  na_ontap_info:
+    state: info
+    gather_subset: cluster_node_info
+  register: node_info
+- name: Create aggregate
+  na_ontap_aggregate:
+    state: present
+    name: "{{ aggr_prefix }}_{{ item | replace('-', '_')}}"
+    disk_count: "{{ disk_count }}"
+    raid_type: raid_tec
+    raid_size: 24
+    hostname: "{{hostname}}"
+    username: "{{username}}"
+    password: "{{password}}"
+    https: true
+    validate_certs: no
+  loop: "{{ node_info.ontap_info.cluster_node_info | list}}"
