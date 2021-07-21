@@ -15,7 +15,6 @@
   na_ontap_info:
     state: info
     gather_subset: cluster_node_info
-    <<: *ontap
   register: node_info
 - name: Create aggregate
   na_ontap_aggregate:
