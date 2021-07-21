@@ -1,16 +1,14 @@
 # Performs cluster-level configuration. Specifically, creates an aggregate
 # on each cluster node, and then creates a subnet.
----
-- name: ===== Executing Cluster Setup NetApp playbook
+
+- name: Executing Cluster Setup NetApp playbook
   hosts: localhost
   gather_facts: false
-
 - name: Begin cluster post-creation configuration
   hosts: localhost
   collections:
     - netapp.ontap
   gather_facts: false
-
 - name: Gather cluster vserver and node info
   na_ontap_info:
     state: info
