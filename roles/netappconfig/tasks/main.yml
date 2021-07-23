@@ -1,0 +1,33 @@
+# Gather NetApp info
+- name: Get NetApp info (Password Authentication)
+  na_ontap_info:
+    state: info
+    hostname: "{{clusterIP}}"
+    username: "{{username}}"
+    password: "{{password}}"
+    https: yes
+    validate_certs: no
+  register: netappFacts
+  delegate_to: localhost
+
+- name: Disable autoassign
+  na_ontap_command:
+    command: ['disk option modify -node {{item}} -autoassign off']
+    hostname: "{{ clusterIP }}"
+    username: "{{ username }}"
+    password: "{{ password }}"
+    https: true
+    validate_certs: no
+  with_items: "{{ netappFacts.ontap_info.cluster_node_info | list}}"
+  delegate_to: localhost
+  
+- name: Modify Aggregate
+  na_ontap_command:
+    command: ['aggregate modify -aggregate {{item.key}} -maxraidsize 29']
+    hostname: "{{clusterIP}}"
+    username: "{{username}}"
+    password: "{{password}}"
+    https: true
+    validate_certs: no
+  when: "'aggr1' in item.key and 'hdd' in item.value.aggr_raid_attributes.aggregate_type"
+  with_items: "{{ netappFacts.ontap_info.aggregate_info | dict2items}}"
