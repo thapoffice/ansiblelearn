@@ -2,7 +2,9 @@
 
 - name: set facts
   set_fact: 
+
     BILLING_ACCT: ##INSERT BILLING ACCOUNT HERE
+
     ROOT_TENANT_FOLDER_ID: "{{ lookup('env', 'ANS_GCP_TENANT_ROOT_FOLDER_ID' ) }}"
     RTR_MASK: 29
     PEER_ASN: 65500
