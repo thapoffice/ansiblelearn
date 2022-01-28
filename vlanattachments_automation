@@ -1,0 +1,211 @@
+#This playbook should run Google Cloud commands
+
+- name: set facts
+  set_fact: 
+    BILLING_ACCT: 0190FC-B416A9-A3EE1C
+    ROOT_TENANT_FOLDER_ID: "{{ lookup('env', 'ANS_GCP_TENANT_ROOT_FOLDER_ID' ) }}"
+    RTR_MASK: 29
+    PEER_ASN: 65500
+
+- name: vars from input
+  set_fact:
+    CAGE_ID: "{{ vrf.dataCenter.code }}"
+    ACCOUNT_ID: "{{ vrf.accountId.accountId }}"
+    TENANT_PROJECT: "{{ vrf.googleTenantProjectId }}"
+    REGION_ABBV: "{{ vrf.dataCenter.googleRegionCode }}"
+    BANDWIDTH: 20 #"{{ vrf.qosPolicy.bandwidthGbps }}"                                          
+    VLAN_1: "{{ vrf.peeringData[0].peerVlanId }}"
+    VLAN_2: "{{ vrf.peeringData[1].peerVlanId }}"
+    CUSTOMER_PROJECT: "{{ vrf.googleCustomerProjectId }}"
+    CUSTOMER_VPC: "{{ vrf.googleCustomerVPCName }}"
+
+- name: vars from input
+  set_fact:
+    REGION: "{{ regionTranslator [REGION_ABBV] }}"
+
+- name: compute variables
+  set_fact:
+    TENANT_VPC: "vpc1-priv-{{ ACCOUNT_ID }}-{{ CAGE_ID }}"
+    ROUTER_1: "cloudrouter-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-rt1"
+    ROUTER_2: "cloudrouter-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-rt2"
+    VLAN_ATT_1: "vlan-att-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-1"
+    VLAN_ATT_2: "vlan-att-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-2"
+    RTR_IF_1: "rtr-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-if-1"
+    RTR_IF_2: "rtr-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-if-2"
+    BGP_PEER_1: "bgppeer-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-peer-1"
+    BGP_PEER_2: "bgppeer-{{ ACCOUNT_ID }}-{{ CAGE_ID }}-peer-2"
+    FW_TENANT: "fw-{{ ACCOUNT_ID }}-{{ CAGE_ID }}"
+
+- name: For first cage use environment name
+  set_fact:
+    DIC_PROJECT: "atos-bm4gcp-dic-{{ REGION_ABBV }}-{{ lookup('env','ANS_GLOBAL_ENV') }}"
+    DIC_NAME_1: "bm4gcp-dic-{{ REGION_ABBV }}-{{lookup('env','ANS_GLOBAL_ENV')}}-1"
+    DIC_NAME_2: "bm4gcp-dic-{{ REGION_ABBV }}-{{lookup('env','ANS_GLOBAL_ENV')}}-2"
+  when: (CAGE_ID | length) == 3
+    
+- name: For subsequent cages use cage id
+  set_fact:
+    DIC_PROJECT: "atos-bm4gcp-dic-{{ REGION_ABBV }}-{{ CAGE_ID }}"
+    DIC_NAME_1: "bm4gcp-dic-{{ REGION_ABBV }}-{{ CAGE_ID }}-1"
+    DIC_NAME_2: "bm4gcp-dic-{{ REGION_ABBV }}-{{ CAGE_ID }}-2"
+  when: (CAGE_ID | length) > 3
+
+- name: compute variables
+  set_fact:
+    TENANT_PEER: "peer-{{ TENANT_VPC }}-{{ CUSTOMER_VPC }}"
+    CUSTOMER_PEER: "peer-{{ CUSTOMER_VPC }}-{{ TENANT_VPC }}"
+
+- name: login GCP
+  shell: |
+    gcloud auth activate-service-account --key-file {{ lookup('env', "GCE_CREDENTIALS_FILE_PATH") }}
+
+- name: Get parent folder ID
+  shell: |                                                                                                                    
+    gcloud resource-manager folders list --folder={{ROOT_TENANT_FOLDER_ID}} --format=json
+  register: FOLDER_ID_OUT
+
+- name: getting folderID
+  set_fact: 
+    FOLDER_ID: "{{ ((FOLDER_ID_OUT.stdout | from_json | selectattr('displayName', 'equalto', CAGE_ID) | list | first ).name.split ('/'))[1] }}"
+
+- name: Print FOLDER_ID_OUT
+  shell: |
+    echo {{ FOLDER_ID }}
+
+- name: Check Project
+  shell: |
+    gcloud projects list --filter {{ TENANT_PROJECT }} --format=json
+  register:
+    PROJECT_CHECK_OUT
+
+- name: Create project
+  shell: |
+    gcloud projects create {{TENANT_PROJECT}} --folder={{FOLDER_ID}}
+  when: "(PROJECT_CHECK_OUT.stdout | from_json ) | length == 0"
+
+# - name: Enable required APIs
+#   shell: |            
+#     gcloud services enable cloudbilling.googleapis.com --project={{TENANT_PROJECT}}
+
+- name: Link billing account to project
+  shell: |                                                                               
+    gcloud beta billing projects link {{ TENANT_PROJECT }} --billing-account {{BILLING_ACCT}}
+    gcloud services enable compute.googleapis.com --project={{TENANT_PROJECT}}
+
+- name: Create Tenant VPC Network
+  shell: |                                                                                                                              
+    gcloud compute networks create {{TENANT_VPC}} --project={{TENANT_PROJECT}} --subnet-mode=custom --description="Tenant VPC for {{ACCOUNT_ID}}, Cage {{CAGE_ID}}" --bgp-routing-mode=GLOBAL
+            
+- name: Create Tenant VPC Network (DEFAULT_ROUTE)
+  shell: |                                                                                                                              
+    gcloud compute routes list --project={{ TENANT_PROJECT }} --format=json
+  register: DEFAULT_ROUTE_OUT
+
+- name: Setting DEFAULT_ROUTE
+  set_fact:
+    DEFAULT_ROUTE: "{{ (DEFAULT_ROUTE_OUT.stdout | from_json)[0].name }}"
+
+- name: Delete Tenant VPC Network (DEFAULT_ROUTE)
+  shell: |                                                                                                                              
+    gcloud compute routes delete {{ DEFAULT_ROUTE }} --project={{ TENANT_PROJECT }} |  echo "yes" 
+
+- name: Create redundant Cloud Routers
+  shell: |
+    gcloud compute routers create {{ ROUTER_1 }} --project={{TENANT_PROJECT}} --network={{TENANT_VPC}} --asn=16550 --region={{REGION}}
+    gcloud compute routers create {{ ROUTER_2 }} --project={{TENANT_PROJECT}} --network={{TENANT_VPC}} --asn=16550 --region={{REGION}}
+
+# need to add service account for every dc
+- name: Create redundant VLAN Attachments
+  shell: |                                                                                                                           
+    gcloud compute interconnects attachments dedicated create {{ VLAN_ATT_1 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --interconnect=projects/{{ DIC_PROJECT }}/global/interconnects/{{ DIC_NAME_1 }} --router={{ ROUTER_1 }} --description="VLAN Attachment for {{ ACCOUNT_ID }}, Cage {{ CAGE_ID }} - 1" --bandwidth={{ BANDWIDTH }}'G' --vlan={{ VLAN_1 }}
+    gcloud compute interconnects attachments dedicated create {{ VLAN_ATT_2 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --interconnect=projects/{{ DIC_PROJECT }}/global/interconnects/{{ DIC_NAME_2 }} --router={{ ROUTER_2 }} --description="VLAN Attachment for {{ ACCOUNT_ID }}, Cage {{ CAGE_ID }} - 2" --bandwidth={{ BANDWIDTH }}'G' --vlan={{ VLAN_2 }}  
+
+- name: create RTR_IF_1_IP
+  shell: |                                                                                                                                          
+    gcloud compute interconnects attachments describe {{ VLAN_ATT_1 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --format=json
+  register: RTR_IF_1_IP_OUT
+
+- name: Setting RTR_IF_1_IP
+  set_fact:
+    RTR_IF_1_IP: "{{(RTR_IF_1_IP_OUT.stdout | from_json).cloudRouterIpAddress.split ('/')[0]}}"
+
+- name: create RTR_IF_2_IP
+  shell: |
+    gcloud compute interconnects attachments describe {{ VLAN_ATT_2 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --format=json
+  register: RTR_IF_2_IP_OUT
+
+- name: Setting RTR_IF_2_IP
+  set_fact:
+    RTR_IF_2_IP: "{{(RTR_IF_2_IP_OUT.stdout | from_json).cloudRouterIpAddress.split ('/')[0]}}"
+
+- name: create ON_PREM_RTR_IP1
+  shell: |
+    gcloud compute interconnects attachments describe {{ VLAN_ATT_1 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --format=json
+  register: ON_PREM_RTR_IP1_OUT
+
+- name: Setting ON_PREM_RTR_IP1
+  set_fact:
+    ON_PREM_RTR_IP1: "{{(ON_PREM_RTR_IP1_OUT.stdout | from_json).customerRouterIpAddress.split ('/')[0]}}"
+
+- name: create ON_PREM_RTR_IP2
+  shell: |
+    gcloud compute interconnects attachments describe {{ VLAN_ATT_2 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --format=json
+  register: ON_PREM_RTR_IP2_OUT
+
+- name: Setting ON_PREM_RTR_IP2
+  set_fact:
+    ON_PREM_RTR_IP2: "{{(ON_PREM_RTR_IP2_OUT.stdout | from_json).customerRouterIpAddress.split ('/')[0]}}"
+
+- name: AIRFLOW_RETURN
+  set_fact:
+    peeringData:
+    - peerIP: "{{(RTR_IF_1_IP_OUT.stdout | from_json).cloudRouterIpAddress}}"
+      routerIP: "{{(ON_PREM_RTR_IP1_OUT.stdout | from_json).customerRouterIpAddress}}"
+    - peerIP: "{{(RTR_IF_2_IP_OUT.stdout | from_json).cloudRouterIpAddress}}"
+      routerIP: "{{(ON_PREM_RTR_IP2_OUT.stdout | from_json).customerRouterIpAddress}}"
+
+- name: Create Cloud Router Interfaces
+  shell: |
+    gcloud compute routers add-interface {{ ROUTER_1 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --ip-address={{ RTR_IF_1_IP }} --mask-length={{ RTR_MASK }} --interface-name={{ RTR_IF_1 }} --interconnect-attachment={{ VLAN_ATT_1 }}
+    gcloud compute routers add-interface {{ ROUTER_2 }} --project={{ TENANT_PROJECT }} --region={{ REGION }} --ip-address={{ RTR_IF_2_IP }} --mask-length={{ RTR_MASK }} --interface-name={{ RTR_IF_2 }} --interconnect-attachment={{ VLAN_ATT_2 }}
+
+- name: Create Cloud Router BGP Peers
+  shell: |
+    gcloud compute routers add-bgp-peer {{ROUTER_1}} --project={{TENANT_PROJECT}} --interface={{RTR_IF_1}} --region={{REGION}} --peer-name={{BGP_PEER_1}} --peer-ip-address={{ON_PREM_RTR_IP1}} --peer-asn={{PEER_ASN}} --advertisement-mode=CUSTOM --set-advertisement-groups all_subnets --set-advertisement-ranges 0.0.0.0/0
+    gcloud compute routers add-bgp-peer {{ROUTER_2}} --project={{TENANT_PROJECT}} --interface={{RTR_IF_2}} --region={{REGION}} --peer-name={{BGP_PEER_2}} --peer-ip-address={{ON_PREM_RTR_IP2}} --peer-asn={{PEER_ASN}} --advertisement-mode=CUSTOM --set-advertisement-groups all_subnets --set-advertisement-ranges 0.0.0.0/0
+
+- name: Create Tenant VPC > Customer VPC Peering
+  shell: |
+    gcloud beta compute networks peerings create {{ TENANT_PEER }} --project={{TENANT_PROJECT}} --network={{ TENANT_VPC }} --peer-project={{ CUSTOMER_PROJECT }} --peer-network={{ CUSTOMER_VPC }} --import-custom-routes --export-custom-routes
+
+#for client
+- name: Create Customer VPC > Tenant VPC Peering
+  shell: |
+    echo gcloud beta compute networks peerings create {{ CUSTOMER_PEER }} --project={{ CUSTOMER_PROJECT }} --network={{ CUSTOMER_VPC }} --peer-project={{ TENANT_PROJECT }} --peer-network={{ TENANT_VPC }} --import-custom-routes --export-custom-routes
+
+- name: create temporary file
+  tempfile:
+    state: file
+    suffix: temp
+  register: tempfile_1
+
+- name: write VRF information to GCS temporary file
+  template:
+    src: "vrfwelcome.txt.j2"
+    dest: "{{ tempfile_1.path }}"
+
+- name: Upload customer VRF welcome pack to GCS
+  gcp_storage_object :
+    auth_kind: serviceaccount
+    project: "{{ lookup('env', 'ANS_PROJECT_CUSTOMERDETAILS') }}"
+    bucket: "{{ lookup('env', 'ANS_BUCKET_CUSTOMERDETAILS') }}"
+    dest: "{{ vrf.accountId.accountId }}/{{ vrf.dataCenter.code }}/{{ vrf.name }}_peering_instructions.txt"
+    src: "{{ tempfile_1.path }}"
+    action: upload
+    overwrite: true
+  vars:
+    ansible_python_interpreter: /var/lib/awx/venv/ansible/bin/python
+
+- name: Create firewall rules in Tenant VPC (check if needed)
+  shell: |
+    gcloud compute firewall-rules create {{FW_TENANT}} --project={{TENANT_PROJECT}} --network {{TENANT_VPC}} --allow tcp,udp,icmp --source-ranges 0.0.0.0/0
