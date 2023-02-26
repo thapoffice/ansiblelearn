@@ -1,0 +1,37 @@
+# Creating Local Disk in this manifest
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-k3disk
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: k3disk
+  local:
+    path: /k3sdisk/vol1  #Your local disk path
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - k3s-master   # <--- Your K3s master node name here
+
+
+#### RUN THIS BEFORE running kubcetl create command to create the pvc,
+#content below is not part of yml but should be run on the cluster node
+
+#LOCPVC_PATH="/k3sdisk/" # Replace with your mount point or location
+#DIRNAME="vol1" #replace vol1 with your naming or what ever ;)
+#sudo mkdir -p $LOCPVC_PATH$DIRNAME 
+#sudo chcon -Rt svirt_sandbox_file_t $LOCPVC_PATH$DIRNAME
+#sudo chmod 777 $LOCPVC_PATH$DIRNAME   
+
+      	  
+      	  
+      	  
+      	  
