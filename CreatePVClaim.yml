@@ -1,33 +1,12 @@
+#Creating a PVC (Physical Volume Claim)
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
-  name: openvpn-data-claim
-  namespace: openvpn
+  name: local-disk-pvc
 spec:
   accessModes:
-    - ReadWriteOnce
+  - ReadWriteOnce
+  storageClassName: k3disk #<-- Stoage Class Name you created
   resources:
     requests:
       storage: 1Gi
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: k3disk
-  local:
-    path: /k3sdisk/vol1    #path to local disk on your k3s cluster node
-  nodeAffinity:
-    required:
-      nodeSelectorTerms:
-      - matchExpressions:
-        - key: kubernetes.io/hostname
-          operator: In
-          values:
-          - k3s-master #<--- Your cluster node here
-
-
-#### RUN THIS BEFORE running kubcetl create command to create the pvc,
-#content below is not part of yml but should be run on the cluster node
-
-#LOCPVC_PATH="/k3sdisk/" # Replace with your mount point or location
-#DIRNAME="vol1" #replace vol1 with your naming or what ever ;)
-#sudo mkdir -p $LOCPVC_PATH$DIRNAME 
-#sudo chcon -Rt svirt_sandbox_file_t $LOCPVC_PATH$DIRNAME
-#sudo chmod 777 $LOCPVC_PATH$DIRNAME         	  
